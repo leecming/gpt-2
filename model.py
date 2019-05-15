@@ -1,6 +1,34 @@
+import collections
+import re
 import numpy as np
 import tensorflow as tf
 from tensorflow.contrib.training import HParams
+
+
+def get_assignment_map_from_checkpoint(tvars, init_checkpoint):
+    """Compute the union of the current variables and checkpoint variables."""
+    initialized_variable_names = {}
+
+    name_to_variable = collections.OrderedDict()
+    for var in tvars:
+        name = var.name
+        m = re.match("^(.*):\\d+$", name)
+        if m is not None:
+            name = m.group(1)
+        name_to_variable[name] = var
+
+    init_vars = tf.train.list_variables(init_checkpoint)
+
+    assignment_map = collections.OrderedDict()
+    for x in init_vars:
+        (name, var) = (x[0], x[1])
+        if name not in name_to_variable:
+            continue
+        assignment_map[name] = name
+        initialized_variable_names[name] = 1
+        initialized_variable_names[name + ":0"] = 1
+
+    return assignment_map, initialized_variable_names
 
 def default_hparams():
     return HParams(
@@ -172,3 +200,39 @@ def model(hparams, X, past=None, scope='model', reuse=False):
         logits = tf.reshape(logits, [batch, sequence, hparams.n_vocab])
         results['logits'] = logits
         return results
+
+
+def classifier_model(hparams, X, labels, past=None, scope='model', reuse=False):
+    with tf.variable_scope(scope, reuse=reuse):
+        results = {}
+        batch, sequence = shape_list(X)
+
+        wpe = tf.get_variable('wpe', [hparams.n_ctx, hparams.n_embd],
+                             initializer=tf.random_normal_initializer(stddev=0.01))
+        wte = tf.get_variable('wte', [hparams.n_vocab, hparams.n_embd],
+                             initializer=tf.random_normal_initializer(stddev=0.02))
+        past_length = 0 if past is None else tf.shape(past)[-2]
+        h = tf.gather(wte, X) + tf.gather(wpe, positions_for(X, past_length))
+
+        # Transformer
+        presents = []
+        pasts = tf.unstack(past, axis=1) if past is not None else [None] * hparams.n_layer
+        assert len(pasts) == hparams.n_layer
+        for layer, past in enumerate(pasts):
+            h, present = block(h, 'h%d' % layer, past=past, hparams=hparams)
+            presents.append(present)
+        results['present'] = tf.stack(presents, axis=1)
+        h = norm(h, 'ln_f')
+
+        # Classifier model loss.
+        h_flat = tf.reshape(h, [batch, sequence * hparams.n_embd])
+
+        hidden_size = h_flat.shape[-1].value
+        output_weights = tf.get_variable(
+            "output_weights", [6, hidden_size],
+            initializer=tf.truncated_normal_initializer(stddev=0.02))
+
+        logits = tf.matmul(h_flat, output_weights, transpose_b=True)
+        loss = tf.losses.sigmoid_cross_entropy(labels, logits)
+        probabilities = tf.nn.sigmoid(logits)
+        return loss, probabilities

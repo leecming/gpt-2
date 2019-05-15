@@ -3,6 +3,7 @@ FROM ${FROM_IMAGE_NAME}
 ENV LANG C.UTF-8
 ENV LC_ALL C.UTF-8
 
+RUN pip install toposort networkx pytest nltk tqdm html2text progressbar
 RUN pip install sklearn pandas
 
 RUN apt-get update && apt-get install -y openssh-server git
@@ -20,6 +21,8 @@ RUN mkdir /gpt-2
 WORKDIR /gpt-2
 COPY . .
 RUN pip3 install -r requirements.txt
+
+RUN git clone https://github.com/openai/gradient-checkpointing.git gradientcheckpointing
 
 EXPOSE 22 8888
 CMD ["bash", "-c", "/usr/sbin/sshd && jupyter notebook --ip 0.0.0.0 --no-browser --allow-root"]
