@@ -6,7 +6,7 @@ ENV LC_ALL C.UTF-8
 RUN pip install toposort networkx pytest nltk tqdm html2text progressbar
 RUN pip install sklearn pandas
 
-RUN apt-get update && apt-get install -y openssh-server git
+RUN apt-get update && apt-get install -y openssh-server git screen
 RUN mkdir /var/run/sshd
 RUN echo 'root:testdocker' | chpasswd
 RUN sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config

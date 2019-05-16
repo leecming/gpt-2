@@ -152,8 +152,10 @@ def block(x, scope, *, past, hparams):
     with tf.variable_scope(scope):
         nx = x.shape[-1].value
         a, present = attn(norm(x, 'ln_1'), 'attn', nx, past=past, hparams=hparams)
+        a = tf.nn.dropout(a, rate=hparams.dropout_rate)
         x = x + a
         m = mlp(norm(x, 'ln_2'), 'mlp', nx*4, hparams=hparams)
+        m = tf.nn.dropout(m, rate=hparams.dropout_rate)
         x = x + m
         return x, present
 
@@ -213,6 +215,7 @@ def classifier_model(hparams, X, labels, past=None, scope='model', reuse=False):
                              initializer=tf.random_normal_initializer(stddev=0.02))
         past_length = 0 if past is None else tf.shape(past)[-2]
         h = tf.gather(wte, X) + tf.gather(wpe, positions_for(X, past_length))
+        h = tf.nn.dropout(h, rate=hparams.dropout_rate)
 
         # Transformer
         presents = []

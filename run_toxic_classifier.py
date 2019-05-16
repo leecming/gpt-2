@@ -49,6 +49,9 @@ flags.DEFINE_float('learning_rate', 5e-5, 'The initial learning rate for Adam.')
 flags.DEFINE_float('num_train_epochs', 3.0,
                    'Total number of training epochs to perform.')
 
+flags.DEFINE_float('dropout_rate', 0.1,
+                   'Dropout rate applied during training')
+
 flags.DEFINE_float(
     'warmup_proportion', 0.1,
     'Proportion of training to perform linear learning rate warmup for. '
@@ -72,6 +75,7 @@ class GPTToxicClassifier:
         """
         self.enc = encoder.get_encoder(model_name)
         self.hparams = model.default_hparams()
+        self.hparams.add_hparam('dropout_rate', 0.)  # add dropout for training
         with open(os.path.join('models', model_name, 'hparams.json')) as f:
             self.hparams.override_from_dict(json.load(f))
 
@@ -113,6 +117,11 @@ class GPTToxicClassifier:
         def model_fn(features, labels, mode, params):
             input_ids = features['input_ids']
             label_ids = features['label_ids']
+
+            if mode == tf.estimator.ModeKeys.TRAIN:
+                self.hparams.dropout_rate = FLAGS.dropout_rate
+            else:
+                self.hparams.dropout_rate = 0.
 
             total_loss, probabilities = model.classifier_model(hparams=self.hparams,
                                                                X=input_ids,
