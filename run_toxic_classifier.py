@@ -5,7 +5,7 @@ import pandas as pd
 import tensorflow as tf
 from tensorflow.python.keras.preprocessing.sequence import pad_sequences
 from sklearn.model_selection import KFold
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import log_loss, roc_auc_score
 import encoder
 import model
 import optimization
@@ -49,7 +49,7 @@ flags.DEFINE_float('learning_rate', 5e-5, 'The initial learning rate for Adam.')
 flags.DEFINE_float('num_train_epochs', 3.0,
                    'Total number of training epochs to perform.')
 
-flags.DEFINE_float('dropout_rate', 0.1,
+flags.DEFINE_float('dropout_rate', 0.,
                    'Dropout rate applied during training')
 
 flags.DEFINE_float(
@@ -170,6 +170,7 @@ def main(_):
     gpt_classifier.generate_all_sequences_and_labels()
 
     fold_AUC = 0
+    fold_log_loss = 0
     for curr_fold in range(FLAGS.num_folds):
         # START OF FOLD
         output_dir = '/tmp/toxic_output/fold{}'.format(curr_fold)
@@ -231,11 +232,15 @@ def main(_):
                                                                                 FLAGS.batch_size))
         val_prob = np.array([x['probabilities'] for x in val_predictions])
         val_roc_auc_score = roc_auc_score(fold_y_val, val_prob)
+        val_log_loss = log_loss(fold_y_val, val_prob)
         print('ROC-AUC val score: {0:.4f}'.format(val_roc_auc_score))
+        print('log loss val score: {0:.4f}'.format(val_log_loss))
         fold_AUC += val_roc_auc_score
+        fold_log_loss += val_log_loss
         tf.reset_default_graph()
         # END OF FOLD
     print('Mean AUC: {0:.4f}'.format(fold_AUC / FLAGS.num_folds))
+    print('Mean log-loss: {0:.4f}'.format(fold_log_loss / FLAGS.num_folds))
 
 
 if __name__ == '__main__':

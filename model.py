@@ -75,6 +75,24 @@ def merge_states(x):
     *start, a, b = shape_list(x)
     return tf.reshape(x, start + [a*b])
 
+def dropout(input_tensor, dropout_prob):
+    """Perform dropout.
+
+    Args:
+      input_tensor: float Tensor.
+      dropout_prob: Python float. The probability of dropping out a value (NOT of
+        *keeping* a dimension as in `tf.nn.dropout`).
+
+    Returns:
+      A version of `input_tensor` with dropout applied.
+    """
+    if dropout_prob is None or dropout_prob == 0.0:
+        return input_tensor
+
+    # output = tf.keras.layers.GaussianDropout(dropout_prob)(input_tensor)
+    output = tf.nn.dropout(input_tensor, 1.0 - dropout_prob)
+    return output
+
 def conv1d(x, scope, nf, *, w_init_stdev=0.02):
     with tf.variable_scope(scope):
         *start, nx = shape_list(x)
@@ -123,6 +141,7 @@ def attn(x, scope, n_state, *, past, hparams):
 
         w = mask_attn_weights(w)
         w = softmax(w)
+        w = dropout(w, hparams.dropout_rate)
         a = tf.matmul(w, v)
         return a
 
@@ -137,6 +156,7 @@ def attn(x, scope, n_state, *, past, hparams):
         a = multihead_attn(q, k, v)
         a = merge_heads(a)
         a = conv1d(a, 'c_proj', n_state)
+        a = dropout(a, hparams.dropout_rate)
         return a, present
 
 
@@ -145,6 +165,7 @@ def mlp(x, scope, n_state, *, hparams):
         nx = x.shape[-1].value
         h = gelu(conv1d(x, 'c_fc', n_state))
         h2 = conv1d(h, 'c_proj', nx)
+        h2 = dropout(h2, hparams.dropout_rate)
         return h2
 
 
@@ -152,10 +173,8 @@ def block(x, scope, *, past, hparams):
     with tf.variable_scope(scope):
         nx = x.shape[-1].value
         a, present = attn(norm(x, 'ln_1'), 'attn', nx, past=past, hparams=hparams)
-        a = tf.nn.dropout(a, rate=hparams.dropout_rate)
         x = x + a
         m = mlp(norm(x, 'ln_2'), 'mlp', nx*4, hparams=hparams)
-        m = tf.nn.dropout(m, rate=hparams.dropout_rate)
         x = x + m
         return x, present
 
@@ -210,25 +229,25 @@ def classifier_model(hparams, X, labels, past=None, scope='model', reuse=False):
         batch, sequence = shape_list(X)
 
         wpe = tf.get_variable('wpe', [hparams.n_ctx, hparams.n_embd],
-                             initializer=tf.random_normal_initializer(stddev=0.01))
+                              initializer=tf.random_normal_initializer(stddev=0.01))
         wte = tf.get_variable('wte', [hparams.n_vocab, hparams.n_embd],
-                             initializer=tf.random_normal_initializer(stddev=0.02))
+                              initializer=tf.random_normal_initializer(stddev=0.02),)
         past_length = 0 if past is None else tf.shape(past)[-2]
         h = tf.gather(wte, X) + tf.gather(wpe, positions_for(X, past_length))
-        h = tf.nn.dropout(h, rate=hparams.dropout_rate)
 
         # Transformer
-        presents = []
         pasts = tf.unstack(past, axis=1) if past is not None else [None] * hparams.n_layer
         assert len(pasts) == hparams.n_layer
         for layer, past in enumerate(pasts):
-            h, present = block(h, 'h%d' % layer, past=past, hparams=hparams)
-            presents.append(present)
-        results['present'] = tf.stack(presents, axis=1)
+            h, _ = block(h, 'h%d' % layer, past=past, hparams=hparams)
         h = norm(h, 'ln_f')
 
         # Classifier model loss.
-        h_flat = tf.reshape(h, [batch, sequence * hparams.n_embd])
+        # Option 1: Dense All
+        # h_flat = tf.reshape(h, [batch, sequence * hparams.n_embd])
+
+        # Option 2: Max pool so that [batch_size, max_seq_len, hidden_size]->[batch_size, hidden_size]
+        h_flat = tf.keras.layers.GlobalMaxPool1D()(h)
 
         hidden_size = h_flat.shape[-1].value
         output_weights = tf.get_variable(
