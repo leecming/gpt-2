@@ -87,7 +87,11 @@ def create_optimizer(loss, init_lr, num_train_steps, num_warmup_steps, use_tpu, 
     grads_and_vars = list(zip(grads, tf.trainable_variables()))
     grads_and_vars = [(g, v) for g, v in grads_and_vars if g is not None]
 
-    grads_and_vars = [(g, v) for g, v in grads_and_vars if all(s not in v.name for s in ('wte', 'wpe'))]
+    # Freeze variables
+    freeze_var_names = ['wte', 'wpe']
+    for i in range(3):
+        freeze_var_names.append('h{}'.format(i))
+    grads_and_vars = [(g, v) for g, v in grads_and_vars if all(s not in v.name for s in freeze_var_names)]
 
     grads, tvars = list(zip(*grads_and_vars))
     all_are_finite = tf.reduce_all([tf.reduce_all(tf.is_finite(g)) for g in grads]) if use_fp16 or amp else tf.constant(
